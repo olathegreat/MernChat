@@ -68,27 +68,29 @@ app.post("/login", async (req, res) => {
   const { username, password } = req.body;
   const foundUser = await User.findOne({ username });
 
-  if (foundUser) {
-    const passwordMatch = bcrypt.compareSync(password, foundUser.password);
-
-    if (passwordMatch) {
-      jwt.sign(
-        { userId: foundUser._id, username },
-        process.env.JWT_SECRET,
-        {},
-        (err, token) => {
-          if (err) throw err;
-          res.cookie("token", token,  { sameSite: "none", secure: true }).status(201).json({
-            id: foundUser._id,
-            userCreated,
-          });
-        }
-      );
-
-    }
+  if (!foundUser) {
+    return res.status(401).json({ error: "User not found" });
   }
-  res.status(200).json("ok");
+
+  const passwordMatch = bcrypt.compareSync(password, foundUser.password);
+  if (!passwordMatch) {
+    return res.status(401).json({ error: "Incorrect password" });
+  }
+
+  jwt.sign( 
+    { userId: foundUser._id, username },
+    process.env.JWT_SECRET,
+    {},
+    (err, token) => {
+      if (err) throw err;
+      res
+        .cookie("token", token, { sameSite: "none", secure: true })
+        .status(201)
+        .json({ id: foundUser._id, username });
+    }
+  );
 });
+
 
 app.post("/logout", (req, res) => {
   res.cookie("token", "", { sameSite: "none", secure: true }).json("ok"); })
@@ -282,9 +284,9 @@ wss.on('connection', async (connection, req) => {
        if(file){
            const parts = file.name.split('.');  
            const extension = parts[parts.length - 1]; 
-          filename = Date.now() + '.' + extension; 
+          filename = Math.round(Date.now()/ 10000)*10000  + '.' + extension; 
           const path = __dirname + '/uploads/' + filename;
-         const bufferData = new  Buffer(file.data, 'base64')
+         const bufferData = Buffer.from(file.data.split(',')[1], 'base64')
 
            fs.writeFileSync(path, bufferData, ()=>{
             console.log('file saved')
@@ -306,7 +308,7 @@ wss.on('connection', async (connection, req) => {
             sender: connection.userId,
             _id: messageDoc._id,
             recipient,
-            file: file ? filename : null  
+            file: file ? `/uploads/${filename}` : null   
           })));
       }
     });

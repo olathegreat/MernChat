@@ -19,138 +19,81 @@ const Chat = () => {
     const websocket = new WebSocket("ws://localhost:4000/ws");
     setWs(websocket);
 
-    const handleMessage = (e) => {
-      console.log("Received WebSocket message:", e.data); // Add this for debugging
+    websocket.addEventListener("message", (e) => {
+      console.log("Received WebSocket message:", e.data);
       try {
         const messageData = JSON.parse(e.data);
 
-        const showOnlinePeople = (peopleArray) => {
-          const people = {};
-          peopleArray.forEach((person) => {
-            if (person && person.userId && person.username) {
-              people[person.userId] = person.username;
-            }
-          });
-          console.log("Updated online users:", people); // Add this for debugging
-          setOnlinePeople(people);
-        };
-
         if (messageData.type === "users-online") {
-          showOnlinePeople(messageData.online);
+          setOnlinePeople(messageData.online.reduce((acc, person) => {
+            acc[person.userId] = person.username;
+            return acc;
+          }, {}));
         } else if ("text" in messageData) {
-          setMessages((prev) => [...prev, { ...messageData }]);
+          setMessages((prev) => [...prev, messageData]);
         }
       } catch (error) {
-        console.error("Invalid message received:", e.data);
+        console.error("Invalid message format:", e.data);
       }
-    };
+    });
 
-    websocket.addEventListener("message", handleMessage);
-    // websocket.addEventListener('close', console)
-
-    // const connectToWs = () =>{
-    //   const ws = new WebSocket("ws://localhost:4000/ws");
-    //   setWs(ws);
-    //   ws.addEventListener('message', handleMessage);
-    //   ws.addEventListener('close', connectToWs())
-    // }
-    // connectToWs()
     return () => {
-      websocket.removeEventListener("message", handleMessage);
       websocket.close();
     };
   }, []);
 
-  const selectContact = (userId) => {
-    setSelectedUserId(userId);
-  };
+  const selectContact = (userId) => setSelectedUserId(userId);
 
   const onlinePeopleExclOurUser = { ...onlinePeople };
-  console.log(id);
   delete onlinePeopleExclOurUser[id];
 
+  const sendMessage = (e, file = null) => {
+    if (e) e.preventDefault();
+    const message = {
+      text: newMessageText,
+      recipient: selectedUserId,
+      file,
+    };
 
-   const  sendFileChosen = (e) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(e.target.files[0]);
-    reader.onLoad = () =>{
-      sendMessage (null, {
-        data: reader.result,
-        name: e.target.files[0].name
-
-      })
-    }
-   }
-  const sendMessage = (e, file=null) => {
-    if(e) e.preventDefault();
+    ws.send(JSON.stringify(message));
     
-   
 
-    
-    ws.send(
-      JSON.stringify({
-        text: newMessageText,
-        recipient: selectedUserId,
-        file,
-      
-      })
-    );
-    setNewMessageText("");
+    const parts = file.name.split('.');  
+    const extension = parts[parts.length - 1]; 
+   const filename = Math.round(Date.now()/ 10000)*10000  + '.' + extension; 
 
     setMessages((prev) => [
       ...prev,
-      {
+      { ...{
         text: newMessageText,
-        sender: id,
-        recipient: selectedUserId,
-        _id: Date.now(),
-      },
+      recipient: selectedUserId,
+      file: filename
+      }, sender: id, _id: Date.now() },
     ]);
-    if(file){
-      axios.get("/messages/" + selectedUserId).then((res) => {
-        console.log(res.data);
-        setMessages(res.data);
-      });
-    }else{
-      setNewMessageText("");
-      setMessages((prev) => [
-        ...prev,
-        {
-          text: newMessageText,
-          sender: id,
-          recipient: selectedUserId,
-          _id: Date.now(),
-        },
-      ]);
-    }
-
-    // const div  = divUnderMessages.current
-    // div.scrollIntoView({ behavior: "smooth", block:'end' });
+    setNewMessageText("");
   };
-  useEffect(() => {
-    const div = divUnderMessages?.current;
-    div?.scrollIntoView({ behavior: "smooth", block: "end" });
+  const sendFile = (e) => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      sendMessage(null, { data: reader.result, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  };
+   useEffect(() => {
+    const div = divUnderMessages.current;
+    if (div) div.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
     if (selectedUserId) {
-      axios.get("/messages/" + selectedUserId).then((res) => {
-        console.log(res.data);
-        setMessages(res.data);
-      });
+      axios.get("/messages/" + selectedUserId).then((res) => setMessages(res.data));
     }
   }, [selectedUserId]);
 
   useEffect(() => {
     axios.get("/people").then((res) => {
-      const offlinePeopleArr = res.data
-        .filter((p) => p._id !== id)
-        .fliter((p) => Object.keys(onlinePeople).includes(p._id));
-      const offlinePeople = {};
-      offlinePeopleArr.forEach((p) => {
-        offlinePeople[p._id] = p;
-      });
-      setOfflinePeople(offlinePeople);
+      setOfflinePeople(res.data.filter((p) => !onlinePeople[p._id]));
     });
   }, [onlinePeople]);
   console.log("Online people excluding me:", onlinePeopleExclOurUser);
@@ -163,13 +106,7 @@ const Chat = () => {
     });
   };
 
-  const sendFile =  (e) =>{
-    
-    
-    sendMessage(e)
-  }
-
-  //  const messageWithoutDups = uniqBy(messages, 'id')
+ 
   return (
     <div className="flex h-screen">
       <div className="bg-white w-1/4 flex flex-col">
@@ -233,6 +170,7 @@ const Chat = () => {
         <div className="flex-grow overflow-y-scroll">
           {selectedUserId ? (
             messages.map((message, index) => (
+              
               <div
                 className={`${
                   message.sender === id ? "text-right" : "text-left"
@@ -248,15 +186,21 @@ const Chat = () => {
                 >
                   {message.text}
                   {message.file && (
-                    <div className="">
-                      
+  <div className="">
+    <a
+      target="_blank"
+      className="border-b flex items-center gap-1"
+      href={axios.defaults.baseURL + "/uploads/" + message.file}
+      rel="noopener noreferrer" // For better security
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+        <path fillRule="evenodd" d="M18.97 3.659a2.25 2.25 0 0 0-3.182 0l-10.94 10.94a3.75 3.75 0 1 0 5.304 5.303l7.693-7.693a.75.75 0 0 1 1.06 1.06l-7.693 7.693a5.25 5.25 0 1 1-7.424-7.424l10.939-10.94a3.75 3.75 0 1 1 5.303 5.304L9.097 18.835l-.008.008-.007.007-.002.002-.003.002A2.25 2.25 0 0 1 5.91 15.66l7.81-7.81a.75.75 0 0 1 1.061 1.06l-7.81 7.81a.75.75 0 0 0 1.054 1.068L18.97 6.84a2.25 2.25 0 0 0 0-3.182Z" clipRule="evenodd" />
+      </svg>
+      {message.file}
+    </a>
+  </div>
+)}
 
-                      <a target="_blank" className="border-b  flex items-center gap-1" href={axios.defaults.baseURL +"/" + message.file}>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-  <path fillRule="evenodd" d="M18.97 3.659a2.25 2.25 0 0 0-3.182 0l-10.94 10.94a3.75 3.75 0 1 0 5.304 5.303l7.693-7.693a.75.75 0 0 1 1.06 1.06l-7.693 7.693a5.25 5.25 0 1 1-7.424-7.424l10.939-10.94a3.75 3.75 0 1 1 5.303 5.304L9.097 18.835l-.008.008-.007.007-.002.002-.003.002A2.25 2.25 0 0 1 5.91 15.66l7.81-7.81a.75.75 0 0 1 1.061 1.06l-7.81 7.81a.75.75 0 0 0 1.054 1.068L18.97 6.84a2.25 2.25 0 0 0 0-3.182Z" clipRule="evenodd" />
-</svg>{message.file}</a>
-                    </div>
-                  )}
                 </div>
               </div>
             ))
